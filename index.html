@@ -1,0 +1,1987 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A pendulum-wave chime generator: detuned, drifting pendulum physics driving a bell synthesiser and a chord pad, with a starfield visualisation locked to the sound.">
+<style>
+  html, body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<title>Pendulum Wave Chimes</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  color-scheme: dark;
+
+  --bg:        #070912;
+  --bg-glow-a: #101733;
+  --bg-glow-b: #06070E;
+  --panel:     #0E1122;
+  --panel-hi:  #171B31;
+  --line:      rgba(186,199,235,.10);
+  --line-str:  rgba(186,199,235,.20);
+
+  --ink:   #EDE7DC;
+  --ink-2: #A6ADC2;
+  --ink-3: #6B7288;
+
+  --brass:     #EFB55E;
+  --brass-dim: #7E6234;
+  --teal:      #35A0A6;
+  --indigo:    #3E5CA8;
+
+  --r-sm: 3px;
+  --r-md: 6px;
+
+  --f-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --f-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+*{ box-sizing: border-box; }
+
+body{
+  margin:0;
+  background: var(--bg);
+  background-image:
+    radial-gradient(1100px 620px at 50% -12%, var(--bg-glow-a) 0%, rgba(16,23,51,0) 62%),
+    linear-gradient(180deg, var(--bg) 0%, var(--bg-glow-b) 100%);
+  background-attachment: fixed;
+  color: var(--ink);
+  font-family: var(--f-sans);
+  font-weight: 300;
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app{
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 28px 20px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* ---------- masthead ---------- */
+.masthead{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px 28px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+h1{
+  font-family: var(--f-display);
+  font-weight: 400;
+  font-size: clamp(30px, 4.6vw, 46px);
+  line-height: 1.02;
+  letter-spacing: -.008em;
+  margin: 0;
+  text-wrap: balance;
+}
+h1 em{ font-style: italic; color: var(--brass); }
+.tagline{
+  margin: 7px 0 0;
+  max-width: 48ch;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+.masthead-meta{
+  font-family: var(--f-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  text-align: right;
+  line-height: 1.8;
+  font-variant-numeric: tabular-nums;
+}
+.masthead-meta b{ color: var(--ink-2); font-weight: 500; }
+
+/* ---------- layout ---------- */
+.workbench{
+  display: grid;
+  grid-template-columns: minmax(0,1fr) 290px;
+  gap: 20px;
+  align-items: stretch;
+}
+@media (max-width: 900px){
+  .workbench{ grid-template-columns: minmax(0,1fr); }
+}
+
+/* ---------- stage ---------- */
+.stage{
+  background: linear-gradient(180deg, #0B0E1D 0%, #070912 100%);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.stage:fullscreen{ border-radius: 0; border: none; }
+.stage .transport, .stage .cycle{ transition: opacity .5s ease; }
+.stage.immersive .transport, .stage.immersive .cycle{ opacity: 0; pointer-events: none; }
+.stage:fullscreen .canvas-wrap{ cursor: none; }
+.stage:fullscreen:not(.immersive) .canvas-wrap{ cursor: pointer; }
+.canvas-wrap{
+  position: relative;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: clamp(340px, 56vh, 640px);
+  cursor: pointer;
+  /* the sky layer is scaled up for parallax — clip it here, or it spills over the
+     transport bar below and swallows clicks meant for the buttons */
+  overflow: hidden;
+}
+/* and keep the controls above the canvas stack whatever happens */
+.transport, .cycle{ position: relative; z-index: 2; }
+canvas{ position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+#bg{ will-change: transform; transform: scale(1.06); }
+
+.scrim{
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(420px 300px at 50% 50%, rgba(7,9,18,.62), rgba(7,9,18,.18) 70%, transparent);
+  transition: opacity .3s ease;
+}
+.scrim[hidden]{ display: none; }
+.big-play{
+  appearance: none;
+  width: 78px; height: 78px;
+  border-radius: 50%;
+  border: 1px solid var(--brass-dim);
+  background: rgba(239,181,94,.10);
+  color: var(--brass);
+  font-size: 20px;
+  cursor: pointer;
+  display: grid; place-items: center;
+  backdrop-filter: blur(2px);
+  transition: background .2s, transform .2s, border-color .2s;
+  padding-left: 5px;
+}
+.big-play:hover{ background: rgba(239,181,94,.20); border-color: var(--brass); transform: scale(1.05); }
+
+.transport{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--line);
+  background: rgba(255,255,255,.015);
+  flex-wrap: wrap;
+}
+.play{
+  appearance: none;
+  border: 1px solid var(--brass-dim);
+  background: linear-gradient(180deg, rgba(239,181,94,.20), rgba(239,181,94,.07));
+  color: var(--brass);
+  font-family: var(--f-sans);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 8px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 108px;
+  justify-content: center;
+  transition: background .18s, border-color .18s;
+}
+.play:hover{ background: rgba(239,181,94,.26); border-color: var(--brass); }
+.play .glyph{ font-size: 10px; line-height: 1; }
+.ghost-btn{
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--line-str);
+  color: var(--ink-2);
+  font-family: var(--f-sans);
+  font-size: 11.5px;
+  letter-spacing: .04em;
+  padding: 7px 13px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color .18s, border-color .18s;
+}
+.ghost-btn:hover{ color: var(--ink); border-color: var(--ink-3); }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible{
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+.clock{
+  font-family: var(--f-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+.phase-tag{
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .11em;
+  color: var(--brass);
+  border: 1px solid var(--brass-dim);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+.transport .spacer{ flex: 1 1 auto; }
+
+/* ---------- cycle strip ---------- */
+.cycle{
+  padding: 16px 20px 14px;
+  border-top: 1px solid var(--line);
+}
+.cycle-rail{
+  position: relative;
+  height: 3px;
+  background: rgba(186,199,235,.11);
+  border-radius: 2px;
+}
+.cycle-fill{
+  position: absolute; inset: 0 auto 0 0;
+  width: 0%;
+  background: linear-gradient(90deg, var(--indigo), var(--teal) 55%, var(--brass));
+  border-radius: 2px;
+}
+.cycle-head{
+  position: absolute; top: 50%; left: 0%;
+  width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: var(--brass);
+  box-shadow: 0 0 10px rgba(239,181,94,.8);
+}
+.cycle-mark{
+  position: absolute; top: -5px;
+  width: 1px; height: 13px;
+  background: var(--line-str);
+  transform: translateX(-.5px);
+}
+.cycle-mark span{
+  position: absolute; top: 17px; left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.cycle-mark.major{ height: 17px; top: -7px; }
+.cycle-mark.major span{ top: 19px; color: var(--ink-2); }
+.cycle-mark.end span{ left: auto; right: 0; transform: none; }
+.cycle-caption{
+  margin: 26px 0 0;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: .06em;
+  color: var(--ink-3);
+}
+
+/* ---------- rail ---------- */
+.rail{
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  align-self: start;
+}
+.group{ padding: 15px 16px 17px; }
+.group + .group, details + .group, .group + details, details + details{ border-top: 1px solid var(--line); }
+.eyebrow{
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: .16em;
+  color: var(--ink-3);
+  margin: 0 0 3px;
+}
+.group-hint{
+  margin: 0 0 13px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  line-height: 1.45;
+}
+
+/* voice cards */
+.voices{ display: flex; flex-direction: column; gap: 6px; }
+.voice{
+  appearance: none;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 9px 12px;
+  cursor: pointer;
+  color: var(--ink-2);
+  font-family: var(--f-sans);
+  transition: border-color .16s, background .16s, color .16s;
+  display: flex; align-items: baseline; gap: 9px;
+}
+.voice:hover{ border-color: var(--ink-3); color: var(--ink); }
+.voice strong{ font-weight: 500; font-size: 13px; color: inherit; }
+.voice span{ font-size: 11px; color: var(--ink-3); }
+.voice[aria-pressed=true]{
+  border-color: var(--brass-dim);
+  background: rgba(239,181,94,.09);
+  color: var(--brass);
+}
+.voice[aria-pressed=true] span{ color: rgba(239,181,94,.65); }
+
+.field{ margin-bottom: 14px; }
+.field:last-child{ margin-bottom: 0; }
+.field-head{
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px; margin-bottom: 4px;
+}
+.field-head label{ font-size: 12.5px; color: var(--ink-2); }
+.field-head output{
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  color: var(--brass);
+  font-variant-numeric: tabular-nums;
+}
+.scale-ends{
+  display: flex; justify-content: space-between;
+  font-family: var(--f-mono); font-size: 9.5px;
+  letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-3); margin-top: 1px;
+}
+
+input[type=range]{
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 20px; background: transparent; cursor: pointer; margin: 0;
+}
+input[type=range]::-webkit-slider-runnable-track{
+  height: 2px; background: rgba(186,199,235,.20); border-radius: 2px;
+}
+input[type=range]::-moz-range-track{
+  height: 2px; background: rgba(186,199,235,.20); border-radius: 2px;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; margin-top: -6px;
+  border-radius: 50%; background: var(--brass);
+  border: none; box-shadow: 0 0 0 3px rgba(239,181,94,.14);
+}
+input[type=range]::-moz-range-thumb{
+  width: 14px; height: 14px; border: none;
+  border-radius: 50%; background: var(--brass);
+  box-shadow: 0 0 0 3px rgba(239,181,94,.14);
+}
+
+select{
+  width: 100%;
+  appearance: none;
+  background-color: var(--panel-hi);
+  color: var(--ink);
+  border: 1px solid var(--line-str);
+  border-radius: var(--r-sm);
+  padding: 7px 26px 7px 9px;
+  font-family: var(--f-sans);
+  font-size: 12.5px;
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%), linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+.duo{ display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+
+.seg{ display: grid; grid-auto-flow: column; gap: 0; border: 1px solid var(--line-str); border-radius: var(--r-sm); overflow: hidden; }
+.seg button{
+  appearance: none; background: transparent; border: none;
+  border-right: 1px solid var(--line);
+  color: var(--ink-3);
+  font-family: var(--f-sans); font-size: 11px;
+  padding: 7px 2px; cursor: pointer;
+  transition: color .16s, background .16s;
+}
+.seg button:last-child{ border-right: none; }
+.seg button:hover{ color: var(--ink); }
+.seg button[aria-pressed=true]{ color: var(--brass); background: rgba(239,181,94,.10); }
+
+.check{
+  display: flex; align-items: flex-start; gap: 9px;
+  font-size: 12.5px; color: var(--ink-2); cursor: pointer;
+  padding: 4px 0;
+}
+.check input{ accent-color: var(--brass); width: 14px; height: 14px; cursor: pointer; margin: 3px 0 0; flex: none; }
+.check em{ font-style: normal; color: var(--ink-3); font-size: 11px; display: block; }
+
+details > summary{
+  list-style: none;
+  cursor: pointer;
+  padding: 14px 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--f-mono);
+  font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+details > summary::-webkit-details-marker{ display: none; }
+details > summary:hover{ color: var(--ink-2); }
+details > summary::after{ content: "+"; font-size: 13px; letter-spacing: 0; }
+details[open] > summary::after{ content: "–"; }
+details[open] > summary{ color: var(--ink-2); }
+details .group{ padding-top: 0; }
+
+/* ---------- ledger ---------- */
+.ledger{
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  overflow: hidden;
+}
+.ledger-head{
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 16px; flex-wrap: wrap;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.ledger-head h2{ font-family: var(--f-display); font-weight: 400; font-size: 20px; margin: 0; }
+.ledger-head p{ margin: 0; font-size: 12px; color: var(--ink-3); max-width: 62ch; }
+.table-scroll{ max-height: 320px; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line-str) transparent; }
+table{ width: 100%; border-collapse: collapse; font-family: var(--f-mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+thead th{
+  position: sticky; top: 0;
+  background: #0F1327;
+  text-align: right; font-weight: 500;
+  font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+thead th:first-child, tbody td:first-child{ text-align: left; }
+tbody td{ padding: 5px 14px; text-align: right; color: var(--ink-2); border-bottom: 1px solid rgba(186,199,235,.05); white-space: nowrap; }
+tbody tr:last-child td{ border-bottom: none; }
+tbody td.note{ color: var(--ink); }
+.swatch{ display: inline-block; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+.ledger-head .swatch{ margin: 0 3px; }
+.voice-bass{ color: var(--indigo); }
+
+footer{
+  color: var(--ink-3);
+  font-size: 11.5px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  display: flex; flex-wrap: wrap; gap: 6px 22px;
+}
+footer code{ font-family: var(--f-mono); color: var(--ink-2); font-size: 11px; }
+
+@media (prefers-reduced-motion: reduce){
+  *{ transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="masthead">
+    <div>
+      <h1>Pendulum Wave <em>Chimes</em></h1>
+      <p class="tagline">Pendulums tuned so each swings one more time per cycle than the last. A bell sounds as an arm crosses the centre line. The pattern does not repeat until the cycle closes.</p>
+    </div>
+    <div class="masthead-meta">
+      arms <b id="meta-len">1.77 – 5.03 m</b><br>
+      periods <b id="meta-per">2.67 – 4.50 s</b><br>
+      <b id="meta-rate">1.8</b> strikes / s &middot; longest arm every <b id="meta-gap">9.0 s</b><br>
+      strike pattern repeats every <b id="meta-repeat">2:24</b>
+    </div>
+  </header>
+
+  <div class="workbench">
+
+    <section class="stage" id="stage">
+      <div class="canvas-wrap" id="wrap">
+        <canvas id="bg"></canvas>
+        <canvas id="cv"></canvas>
+        <canvas id="fx"></canvas>
+        <div class="scrim" id="scrim">
+          <button class="big-play" id="bigplay" aria-label="Play">&#9654;</button>
+        </div>
+      </div>
+
+      <div class="transport">
+        <button class="play" id="play" aria-label="Play"><span class="glyph" id="play-glyph">&#9654;</span><span id="play-text">Play</span></button>
+        <span class="clock" id="clock">00:00.0 / 00:56.0</span>
+        <span class="spacer"></span>
+        <span class="phase-tag" id="phase">travelling wave</span>
+        <button class="ghost-btn" id="restart">Restart</button>
+        <button class="ghost-btn" id="fs">Fullscreen</button>
+      </div>
+
+      <div class="cycle">
+        <div class="cycle-rail" id="rail">
+          <div class="cycle-fill" id="fill"></div>
+          <div class="cycle-head" id="head"></div>
+        </div>
+        <p class="cycle-caption">One cycle — the number of groups the swarm splits into at each division</p>
+      </div>
+    </section>
+
+    <aside class="rail">
+
+      <div class="group">
+        <p class="eyebrow">Voice</p>
+        <p class="group-hint">Four ready-made settings. Start here, then adjust below.</p>
+        <div class="voices" id="voices"></div>
+      </div>
+
+      <div class="group">
+        <p class="eyebrow">Sound</p>
+        <div class="field">
+          <div class="field-head"><label for="s-vol">Volume</label><output id="o-vol">72</output></div>
+          <input type="range" id="s-vol" min="0" max="100" step="1" value="72">
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="s-rev">Reverb</label><output id="o-rev">78</output></div>
+          <input type="range" id="s-rev" min="0" max="100" step="1" value="78">
+          <div class="scale-ends"><span>dry room</span><span>cathedral</span></div>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="s-tone">Tone</label><output id="o-tone">32</output></div>
+          <input type="range" id="s-tone" min="0" max="100" step="1" value="32">
+          <div class="scale-ends"><span>dark</span><span>bright</span></div>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="s-res">Sustain</label><output id="o-res">1.90&times;</output></div>
+          <input type="range" id="s-res" min="40" max="260" step="5" value="190">
+          <div class="scale-ends"><span>short</span><span>ringing</span></div>
+        </div>
+        <label class="check"><input type="checkbox" id="s-drone" checked> <span>Harmony<em>A low drone plus a chord pad that moves with the cycle's quarter points</em></span></label>
+        <label class="check"><input type="checkbox" id="s-breathe" checked> <span>Breathing<em>Slow swell on its own period, T&thinsp;&times;&thinsp;&phi; — never lands twice on the same bar</em></span></label>
+      </div>
+
+      <div class="group">
+        <div class="field-head" style="margin-bottom:3px">
+          <p class="eyebrow" style="margin:0">Density</p><output id="o-dens">2.1 strikes / s</output>
+        </div>
+        <p class="group-hint">How often each arm sounds as it swings. Lower is calmer — and stretches the repeat, because skipping passes desynchronises odd and even arms.</p>
+        <div class="seg" id="seg-stride">
+          <button type="button" data-v="1">Full</button>
+          <button type="button" data-v="2">Half</button>
+          <button type="button" data-v="4">Quarter</button>
+          <button type="button" data-v="8">Eighth</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="field-head" style="margin-bottom:3px">
+          <p class="eyebrow" style="margin:0">Scatter</p>
+          <button class="ghost-btn" id="reseed" style="padding:3px 10px;font-size:10.5px">Reseed</button>
+        </div>
+        <p class="group-hint">Breaks the exact tuning. At zero this is a wave machine; wound up, it is a set of loosely related bells that never come back round.</p>
+        <div class="field">
+          <div class="field-head"><label for="s-spread">Release spread</label><output id="o-spread">28</output></div>
+          <input type="range" id="s-spread" min="0" max="100" step="1" value="28">
+          <div class="scale-ends"><span>same start</span><span>anywhere</span></div>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="s-detune">Detune</label><output id="o-detune">0.30 %</output></div>
+          <input type="range" id="s-detune" min="0" max="150" step="1" value="30">
+          <div class="scale-ends"><span>exact ratios</span><span>1.5 %</span></div>
+        </div>
+      </div>
+
+      <div class="group">
+        <p class="eyebrow">Drift</p>
+        <p class="group-hint">Every arm slowly stretches and shortens its own swing. The rig starts in phase, wanders apart, and comes back exactly on the drift period.</p>
+        <div class="field">
+          <div class="field-head"><label for="s-warp">Depth</label><output id="o-warp">1.2 %</output></div>
+          <input type="range" id="s-warp" min="0" max="50" step="1" value="12">
+          <div class="scale-ends"><span>locked</span><span>loose</span></div>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="s-warpcyc">Period</label><output id="o-warpcyc">5 cycles</output></div>
+          <input type="range" id="s-warpcyc" min="2" max="12" step="1" value="5">
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="s-warpseq">Sequence</label><output id="o-warpseq">60</output></div>
+          <input type="range" id="s-warpseq" min="0" max="100" step="1" value="60">
+          <div class="scale-ends"><span>all together</span><span>one by one</span></div>
+        </div>
+      </div>
+
+      <details id="adv">
+        <summary>The rig</summary>
+        <div class="group">
+          <div class="field">
+            <div class="field-head"><label for="s-count">Pendulums</label><output id="o-count">12</output></div>
+            <input type="range" id="s-count" min="4" max="28" step="1" value="12">
+          </div>
+          <div class="field">
+            <div class="field-head"><label for="s-cycle">Cycle length</label><output id="o-cycle">1:12</output></div>
+            <input type="range" id="s-cycle" min="0" max="1000" step="1" value="258">
+            <div class="scale-ends"><span>24 s</span><span>30 min</span></div>
+          </div>
+          <div class="field">
+            <div class="field-head"><label for="s-base">Swings per cycle</label><output id="o-base">16 – 27</output></div>
+            <input type="range" id="s-base" min="6" max="32" step="1" value="16">
+            <div class="scale-ends"><span>slow, long arms</span><span>fast, short arms</span></div>
+          </div>
+        </div>
+      </details>
+
+      <details id="adv2">
+        <summary>Tuning</summary>
+        <div class="group">
+          <div class="field duo">
+            <div>
+              <div class="field-head"><label for="s-key">Key</label></div>
+              <select id="s-key"></select>
+            </div>
+            <div>
+              <div class="field-head"><label for="s-oct">Register</label></div>
+              <select id="s-oct"><option value="0">Sub</option><option value="1" selected>Low</option><option value="2">Mid</option><option value="3">High</option></select>
+            </div>
+          </div>
+          <div class="field">
+            <div class="field-head"><label for="s-scale">Scale</label></div>
+            <select id="s-scale"></select>
+          </div>
+          <div class="field">
+            <div class="field-head"><label for="s-bass">Deep-bass arms</label><output id="o-bass">5</output></div>
+            <input type="range" id="s-bass" min="0" max="12" step="1" value="5">
+          </div>
+        </div>
+      </details>
+
+      <details id="adv3">
+        <summary>Visuals</summary>
+        <div class="group">
+        <div class="field">
+          <div class="field-head"><label for="s-glow">Glow</label><output id="o-glow">66</output></div>
+          <input type="range" id="s-glow" min="0" max="100" step="1" value="66">
+        </div>
+        <label class="check"><input type="checkbox" id="s-stars" checked> <span>Starfield</span></label>
+        <label class="check"><input type="checkbox" id="s-drift" checked> <span>Orbital drift<em>The whole rig sways a few degrees, on its own long period</em></span></label>
+        <label class="check"><input type="checkbox" id="s-strings"> <span>Arms and arcs</span></label>
+        </div>
+      </details>
+
+    </aside>
+  </div>
+
+  <section class="ledger">
+    <div class="ledger-head">
+      <h2>Bill of materials</h2>
+      <p>Real lengths for a simple pendulum under Earth gravity. Bob size tracks pitch — a heavy
+      <span class="swatch" style="background:#3E5CA8;width:12px;height:12px"></span> low bell down to a light
+      <span class="swatch" style="background:#EFB55E;width:6px;height:6px"></span> high one. Detuned arms are genuinely re-cut, so no two configurations share a bill.</p>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Arm</th><th>Swings / cycle</th><th>Period</th><th>Length</th><th>Strikes / min</th><th>Note</th><th>Frequency</th><th>Voice</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <span>Angular amplitude 26&deg;, small-angle approximation — <code>L = g&thinsp;T&sup2; / 4&pi;&sup2;</code>, <code>g = 9.80665 m/s&sup2;</code></span>
+    <span>Strikes are timed analytically, not from the animation frame</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ============================ model ============================ */
+var G = 9.80665;
+var AMP = 26 * Math.PI / 180;
+
+var SCALES = [
+  { id:"bell",    name:"Bell (minor 7th)",  steps:[0,3,7,10] },
+  { id:"fifths",  name:"Open fifths",       steps:[0,7] },
+  { id:"sus",     name:"Suspended",         steps:[0,5,7] },
+  { id:"hirajoshi", name:"Hirajoshi",       steps:[0,2,3,7,8] },
+  { id:"pentmin", name:"Pentatonic minor",  steps:[0,3,5,7,10] },
+  { id:"pentmaj", name:"Pentatonic major",  steps:[0,2,4,7,9] },
+  { id:"yo",      name:"Yo",                steps:[0,2,5,7,9] }
+];
+var NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+var PHI = 1.6180339887;
+
+var state = {
+  count: 12, cycle: 72, base: 16, stride: 4,
+  key: 9, octave: 1, scale: "bell", bass: 5,
+  vol: 72, rev: 80, tone: 28, res: 2.0,
+  warp: 1.2, warpCyc: 5, warpSeq: 60,
+  spread: 28, detune: 0.30, seed: 20260914,
+  drone: true, breathe: true,
+  glow: 66, stars: true, drift: true, strings: false
+};
+
+/* Scale degrees for the chord pad. Six of them against four segments per cycle, so the
+   harmony only comes back round to the same place every third cycle. */
+var PROG = [0, 2, 4, 1, 3, 5];
+
+/* every voice is checked against its strike density and its true repeat period */
+var VOICES = [
+  { id:"Cathedral", note:"deep bells, vast reverb · 1.8 / s · no repeat",
+    p:{ count:12, cycle:72,  base:16, stride:4, key:9, octave:1, scale:"bell",      bass:5, rev:80, tone:28, res:2.0, warp:1.2, warpCyc:5, warpSeq:60, spread:28, detune:0.30, drone:true } },
+  { id:"Nocturne", note:"suspended, hangs in the air · 2.0 / s · no repeat",
+    p:{ count:14, cycle:84,  base:18, stride:4, key:2, octave:1, scale:"sus",       bass:5, rev:84, tone:30, res:2.2, warp:1.6, warpCyc:7, warpSeq:80, spread:46, detune:0.45, drone:true } },
+  { id:"Tide", note:"slowest, open fifths · 0.5 / s · no repeat",
+    p:{ count:9,  cycle:120, base:20, stride:8, key:7, octave:1, scale:"fifths",    bass:6, rev:92, tone:18, res:2.6, warp:0.8, warpCyc:5, warpSeq:100, spread:18, detune:0.20, drone:true } },
+  { id:"Aurora", note:"brightest, still unhurried · 2.5 / s · no repeat",
+    p:{ count:16, cycle:96,  base:22, stride:4, key:0, octave:2, scale:"hirajoshi", bass:4, rev:74, tone:52, res:1.7, warp:2.2, warpCyc:3, warpSeq:45, spread:60, detune:0.70, drone:true } },
+  { id:"Vigil", note:"long session, 25 m arms · 0.9 / s · no repeat",
+    p:{ count:14, cycle:300, base:30, stride:4, key:9, octave:1, scale:"bell",      bass:6, rev:88, tone:24, res:2.4, warp:1.0, warpCyc:7, warpSeq:70, spread:34, detune:0.35, drone:true } },
+  { id:"Aleatoric", note:"loosest — no repeat at all · 2.2 / s",
+    p:{ count:15, cycle:80,  base:19, stride:4, key:4, octave:1, scale:"pentmin",   bass:5, rev:82, tone:38, res:2.0, warp:2.6, warpCyc:4, warpSeq:100, spread:100, detune:1.30, drone:true } }
+];
+
+var pend = [];
+
+function scaleSteps(){
+  for (var i=0;i<SCALES.length;i++) if (SCALES[i].id === state.scale) return SCALES[i].steps;
+  return SCALES[0].steps;
+}
+
+/* Pitch ladder, bounded.  A 2-note scale over 28 arms would naively climb 14 octaves and
+   put fundamentals past Nyquist, so the ladder is built from the scale pitches inside a
+   capped span and the arms are spread evenly over that pool — sharing notes when there
+   are more arms than pitches. Presets with a natural span under the cap are unaffected. */
+var MIN_MIDI = 24, MAX_MIDI = 93, MAX_SPAN = 54;
+
+function pitchLadder(rootMidi, steps, N){
+  var L = steps.length;
+  var natural = 12 * Math.floor((N - 1) / L) + steps[(N - 1) % L];
+  var span = Math.min(natural, MAX_SPAN, MAX_MIDI - rootMidi);
+  var pool = [], done = false;
+  for (var o = 0; o <= 12 && !done; o++){
+    for (var j = 0; j < L; j++){
+      var m = 12 * o + steps[j];
+      if (m > span){ done = true; break; }
+      pool.push(rootMidi + m);
+    }
+  }
+  if (!pool.length) pool = [rootMidi];
+  var out = [];
+  for (var k = 0; k < N; k++){
+    var idx = N > 1 ? Math.round(k * (pool.length - 1) / (N - 1)) : 0;
+    out.push(Math.max(MIN_MIDI, Math.min(MAX_MIDI, pool[idx])));
+  }
+  return out;
+}
+
+function build(){
+  var steps = scaleSteps();
+  var rootMidi = Math.max(MIN_MIDI, Math.min(84, 12 + state.octave * 12 + state.key));
+  var ladder = pitchLadder(rootMidi, steps, state.count);
+  /* One seeded draw per arm, so a configuration is reproducible and Reseed gives
+     a genuinely different instrument rather than a reshuffle of the same one. */
+  var rnd = rng(state.seed >>> 0);
+  pend = [];
+  for (var k = 0; k < state.count; k++){
+    var n = state.base + k;
+    var alpha = 2 * Math.PI * (state.spread / 100) * rnd();
+    var det = (state.detune / 100) * (rnd() * 2 - 1);
+    var nEff = n * (1 + det);
+    var P = state.cycle / nEff;
+    var midi = ladder[k];
+    var u = state.count > 1 ? k / (state.count - 1) : 0;
+    pend.push({
+      k: k, n: n, nEff: nEff, alpha: alpha, period: P,
+      length: G * P * P / (4 * Math.PI * Math.PI),
+      midi: midi,
+      freq: 440 * Math.pow(2, (midi - 69) / 12),
+      /* pitch ramp, then a hard step between the families: a bass bob is unmistakably
+         a heavier object than a chime, not just the next size down */
+      size: Math.pow(2, -1.35 * u) * (k < state.bass ? 1.45 : 0.82),
+      pan: state.count > 1 ? u * 1.1 - 0.55 : 0,
+      bass: k < state.bass,
+      color: rampColor(colorPos(k)),
+      m: 0
+    });
+    pend[k].orb = makeOrb(pend[k].color);
+  }
+  syncScheduler();
+  renderLedger();
+  renderMeta();
+  drawCycleMarks();
+}
+
+/* The colour ramp is walked in two runs with a hole between them, so deep-bass arms live
+   in the blue end and chimes in the teal-to-brass end with no shades in common. */
+function colorPos(k){
+  var nb = Math.min(state.bass, state.count);
+  if (nb <= 0 || nb >= state.count){
+    return state.count > 1 ? k / (state.count - 1) : 0;
+  }
+  if (k < nb) return nb > 1 ? 0.30 * (k / (nb - 1)) : 0.06;
+  var nc = state.count - nb;
+  return 0.54 + 0.46 * (nc > 1 ? (k - nb) / (nc - 1) : 0.4);
+}
+
+var RAMP = [[62,92,168],[53,160,166],[239,181,94]];
+function rampColor(u){
+  var t = u * (RAMP.length - 1);
+  var i = Math.min(RAMP.length - 2, Math.floor(t));
+  var f = t - i, a = RAMP[i], b = RAMP[i+1];
+  return [Math.round(a[0]+(b[0]-a[0])*f), Math.round(a[1]+(b[1]-a[1])*f), Math.round(a[2]+(b[2]-a[2])*f)];
+}
+function css(c, alpha){ return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + alpha + ")"; }
+
+/* Each arm gets its own pre-rendered glow sprite: a radial falloff with a white-hot core.
+   Drawn with 'lighter' this gives real additive bloom for the cost of one drawImage. */
+function makeOrb(color){
+  var S = 96, c = document.createElement("canvas");
+  c.width = c.height = S;
+  var x = c.getContext("2d");
+  var g = x.createRadialGradient(S/2, S/2, 0, S/2, S/2, S/2);
+  g.addColorStop(0.00, "rgba(255,253,246,0.98)");
+  g.addColorStop(0.09, css(color, 0.92));
+  g.addColorStop(0.24, css(color, 0.44));
+  g.addColorStop(0.48, css(color, 0.13));
+  g.addColorStop(0.76, css(color, 0.035));
+  g.addColorStop(1.00, css(color, 0));
+  x.fillStyle = g;
+  x.fillRect(0, 0, S, S);
+  return c;
+}
+
+/* The visual envelope IS the audio envelope — same two stages, same duration per arm,
+   so a bell you hear ringing is a bob you see ringing, not an approximation of one. */
+function voiceDur(p){
+  if (p.bass) return Math.min(9, 2.4 + 2.6 * state.res);
+  var span = Math.max(1, state.count - 1);
+  return (1.5 + 2.4 * state.res) * (0.5 + 0.5 * (1 - p.k / span));
+}
+function ampEnv(age, dur){
+  if (age < 0 || age >= dur) return 0;
+  var knee = dur * 0.11;
+  if (age < knee) return 1 - 0.70 * (age / knee);
+  return 0.30 * Math.pow(3.333e-4, (age - knee) / (dur - knee));
+}
+function breath(t){
+  return state.breathe
+    ? 0.30 + 0.70 * (0.5 - 0.5 * Math.cos(2 * Math.PI * (t / (state.cycle * PHI))))
+    : 1;
+}
+
+/* ============================ clock ============================ */
+var running = false, simAtStart = 0, audioAtStart = 0, frozenSim = 0;
+function simNow(){ return running ? simAtStart + (actx.currentTime - audioAtStart) : frozenSim; }
+function simToAudio(t){ return audioAtStart + (t - simAtStart); }
+
+/* ============================ audio ============================ */
+var actx=null, master=null, tilt=null, voiceBus=null, dryG=null, wetG=null, conv=null, comp=null, noiseBuf=null;
+var preComp=null, hp=null, predelay=null, droneG=null, droneSend=null, droneLfo=null, droneOscs=[];
+
+function initAudio(){
+  if (actx) return;
+  var AC = window.AudioContext || window.webkitAudioContext;
+  actx = new AC();
+
+  comp = actx.createDynamicsCompressor();
+  comp.threshold.value = -15; comp.knee.value = 12; comp.ratio.value = 6;
+  /* attack slow enough not to chase individual low-frequency cycles — a 6 ms attack
+     tracks a 30 Hz waveform and turns gain reduction into audible pumping */
+  comp.attack.value = 0.018; comp.release.value = 0.55;
+
+  /* nothing sub-audio reaches the compressor: it only eats headroom and makes it pump */
+  hp = actx.createBiquadFilter();
+  hp.type = "highpass"; hp.frequency.value = 32; hp.Q.value = 0.7;
+  preComp = actx.createGain();
+  preComp.connect(hp);
+  hp.connect(comp);
+
+  tilt = actx.createBiquadFilter();
+  tilt.type = "highshelf"; tilt.frequency.value = 2200;
+
+  master = actx.createGain();
+
+  voiceBus = actx.createGain();
+  dryG = actx.createGain();
+  wetG = actx.createGain();
+
+  conv = actx.createConvolver();
+  conv.buffer = makeIR(7.5, 2.1);
+
+  // warm the reverb tail: roll off the top of the wet path
+  var wetLP = actx.createBiquadFilter();
+  wetLP.type = "lowpass"; wetLP.frequency.value = 3200; wetLP.Q.value = 0.4;
+
+  predelay = actx.createDelay(0.5);
+  predelay.delayTime.value = 0.045;
+
+  voiceBus.connect(dryG);
+  voiceBus.connect(predelay);
+  predelay.connect(conv);
+  conv.connect(wetLP);
+  wetLP.connect(wetG);
+  dryG.connect(preComp);
+  wetG.connect(preComp);
+  comp.connect(tilt);
+  tilt.connect(master);
+  master.connect(actx.destination);
+
+  /* the drone bypasses the main reverb — a sustained low tone through a 7.5 s tail
+     is pure mud. It gets its own small send instead. */
+  droneG = actx.createGain();
+  droneG.gain.value = 0;
+  var droneLP = actx.createBiquadFilter();
+  droneLP.type = "lowpass"; droneLP.frequency.value = 260; droneLP.Q.value = 0.5;
+  droneG.connect(droneLP);
+  droneLP.connect(preComp);
+  droneSend = actx.createGain();
+  droneSend.gain.value = 0.16;
+  droneLP.connect(droneSend);
+  droneSend.connect(predelay);
+
+  var n = Math.floor(actx.sampleRate * 0.03);
+  noiseBuf = actx.createBuffer(1, n, actx.sampleRate);
+  var d = noiseBuf.getChannelData(0);
+  for (var i = 0; i < n; i++) d[i] = (Math.random()*2 - 1) * Math.pow(1 - i/n, 3);
+
+  applyMix();
+}
+
+function makeIR(seconds, decay){
+  var rate = actx.sampleRate, len = Math.floor(rate * seconds);
+  var buf = actx.createBuffer(2, len, rate);
+  for (var c = 0; c < 2; c++){
+    var d = buf.getChannelData(c);
+    for (var i = 0; i < len; i++){
+      var t = i / len;
+      var head = i < rate * 0.010 ? i / (rate * 0.010) : 1;
+      d[i] = (Math.random()*2 - 1) * Math.pow(1 - t, decay) * head * 0.75;
+    }
+  }
+  return buf;
+}
+
+/* one loudness law for everything, so the drone keeps its place in the mix
+   however busy or ringing the rig gets */
+function strikeNorm(){
+  return 0.40 / Math.sqrt(Math.max(1, density() * (0.6 + 0.5 * state.res)));
+}
+
+function applyMix(){
+  if (!actx) return;
+  var w = state.rev / 100;
+  wetG.gain.value = 0.25 + w * 1.15;
+  dryG.gain.value = 1 - w * 0.55;
+  master.gain.value = state.vol / 100 * 0.85;
+  tilt.gain.value = -13 + (state.tone / 100) * 22;
+  if (droneG){
+    var lvl = (state.drone && running) ? Math.min(0.085, 0.30 * strikeNorm()) : 0;
+    /* long time-constant: the drone rises under the first strikes, never ahead of them */
+    droneG.gain.setTargetAtTime(lvl, actx.currentTime, running ? 0.9 : 0.25);
+  }
+  if (padOut){
+    var plv = (state.drone && running) ? Math.min(0.062, 0.24 * strikeNorm()) : 0;
+    padOut.gain.setTargetAtTime(plv, actx.currentTime, running ? 1.4 : 0.35);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Chord pad. Two banks of three oscillators; a change writes the new chord into
+   the silent bank and crossfades, so the oscillators never stop and nothing clicks.
+   The progression is driven by the cycle's own quarter points — the harmony moves
+   when the swarm splits into groups, not on an arbitrary timer.
+   --------------------------------------------------------------------------- */
+var padOut = null, padBanks = [], padCur = 0, padIdx = -1;
+var PAD_MIX = [0.50, 0.34, 0.26];
+
+function padRootMidi(){
+  var base = (pend.length ? pend[0].midi : 45) + 12;
+  while (base > 57) base -= 12;
+  while (base < 40) base += 12;
+  return base;
+}
+function chordNotes(idx){
+  var steps = scaleSteps(), L = steps.length;
+  var d = PROG[((idx % PROG.length) + PROG.length) % PROG.length] % L;
+  var stack = L >= 4 ? 2 : 1;          /* stack thirds where the scale has them */
+  var root = padRootMidi(), out = [];
+  for (var i = 0; i < 3; i++){
+    var j = d + i * stack;
+    out.push(root + 12 * Math.floor(j / L) + steps[j % L]);
+  }
+  return out;
+}
+function chordIndexAt(t){ return Math.floor(t / (state.cycle / 4)); }
+
+function ensurePad(){
+  if (!actx || padBanks.length) return;
+  padOut = actx.createGain();
+  padOut.gain.value = 0;
+  var lp = actx.createBiquadFilter();
+  lp.type = "lowpass"; lp.frequency.value = 900; lp.Q.value = 0.4;
+  padOut.connect(lp);
+  lp.connect(preComp);
+  var send = actx.createGain();
+  send.gain.value = 0.9;               /* pads want the room more than the bells do */
+  lp.connect(send);
+  send.connect(predelay);
+
+  for (var b = 0; b < 2; b++){
+    var g = actx.createGain();
+    g.gain.value = 0;
+    g.connect(padOut);
+    var voices = [];
+    for (var i = 0; i < 3; i++){
+      var o = actx.createOscillator();  o.type = "sine";     o.frequency.value = 220;
+      var vg = actx.createGain();       vg.gain.value = PAD_MIX[i];
+      o.connect(vg); vg.connect(g); o.start();
+      var o2 = actx.createOscillator(); o2.type = "triangle"; o2.frequency.value = 440;
+      var vg2 = actx.createGain();      vg2.gain.value = 0.035;
+      o2.connect(vg2); vg2.connect(g); o2.start();
+      voices.push({ o: o, o2: o2 });
+    }
+    padBanks.push({ gain: g, voices: voices });
+  }
+}
+
+function setChord(idx){
+  if (!padBanks.length) return;
+  var notes = chordNotes(idx);
+  var next = 1 - padCur, bank = padBanks[next];
+  var now = actx.currentTime;
+  for (var i = 0; i < 3; i++){
+    var f = 440 * Math.pow(2, (notes[i] - 69) / 12);
+    bank.voices[i].o.frequency.setValueAtTime(f, now);
+    bank.voices[i].o2.frequency.setValueAtTime(f * 2, now);
+  }
+  bank.gain.gain.setTargetAtTime(1, now, 1.2);          /* ~4 s to settle, both ways */
+  padBanks[padCur].gain.gain.setTargetAtTime(0, now, 1.2);
+  padCur = next;
+}
+
+/* keep the drone in a register that speakers can actually reproduce */
+function droneRoot(){
+  var f = pend.length ? pend[0].freq : 55;
+  while (f < 40) f *= 2;
+  while (f > 130) f /= 2;
+  return f;
+}
+
+/* The fifth MUST be the equal-tempered 2^(7/12), not the just 1.5. The bells are tuned in
+   equal temperament, so a just fifth sits 0.113 % away from a real bell pitch — at these
+   registers that is an ~0.09 Hz beat, a ten-second throb under everything, which is exactly
+   the "it resonates instead of fading" artefact. */
+var ET5 = Math.pow(2, 7 / 12);
+var DRONE_SPECS = [[1, 0.55], [ET5, 0.18], [2, 0.13]];
+
+/* Deliberately NO frequency drift here. Detuning the drone to "animate" it re-creates the
+   very beat this fix removes — measured over a minute against a bell on the same pitch, the
+   amplitude peak/trough ratio is 1.01x at zero drift, 2.2x at one cent, and worse beyond.
+   Exact equal temperament means the drone locks phase with a coincident bell instead of
+   throbbing against it, which is inaudible. Movement comes from the amplitude LFO only. */
+function ensureDrone(){
+  if (!actx || droneOscs.length) return;
+  var f = droneRoot();
+  droneLfo = actx.createOscillator();
+  droneLfo.frequency.value = 0.055;
+  var lfoG = actx.createGain();
+  lfoG.gain.value = 0.10;          /* 3 dB swell, not the 13 dB tremolo it used to be */
+  droneLfo.connect(lfoG);
+  for (var i = 0; i < DRONE_SPECS.length; i++){
+    var o = actx.createOscillator();
+    o.type = "sine";
+    o.frequency.value = f * DRONE_SPECS[i][0];
+    var g = actx.createGain();
+    g.gain.value = DRONE_SPECS[i][1];
+    lfoG.connect(g.gain);
+    o.connect(g); g.connect(droneG);
+    o.start();
+    droneOscs.push({ osc: o, ratio: DRONE_SPECS[i][0], det: 1 });
+  }
+  droneLfo.start();
+}
+
+/* Glide, never stop and restart. Dragging a slider fires input events by the dozen;
+   hard-stopping running oscillators that often is a burst of clicks in the bass. */
+function retuneDrone(){
+  padIdx = -1;                         /* re-voice the chord for the new tuning */
+  if (!actx || !droneOscs.length) return;
+  var f = droneRoot();
+  for (var i = 0; i < droneOscs.length; i++){
+    var d = droneOscs[i];
+    d.osc.frequency.setTargetAtTime(f * d.ratio * d.det, actx.currentTime, 0.25);
+  }
+}
+
+var activeVoices = 0;
+
+function strike(when, p, vel){
+  if (activeVoices > 150) return;   /* hard ceiling so extreme settings cannot stall the graph */
+  activeVoices++;
+  /* exact pitch, no per-strike randomisation — two arms sharing a note sum to a steady
+     amplitude, whereas any detune between them would beat at a fraction of a hertz */
+  var f = p.freq;
+  var out = actx.createGain();
+  out.gain.value = vel;
+  var pan = actx.createStereoPanner ? actx.createStereoPanner() : null;
+  if (pan){ pan.pan.value = p.pan; out.connect(pan); pan.connect(voiceBus); }
+  else out.connect(voiceBus);
+
+  var tone = state.tone / 100;
+
+  if (p.bass){
+    var dur = Math.min(9, 2.4 + 2.6 * state.res);
+    var lp = actx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = Math.max(180, f * (3 + 7 * tone));
+    lp.Q.value = 0.5;
+    lp.connect(out);
+    /* the sub-octave only helps while it stays audible — below ~42 Hz it is rumble
+       that the compressor chases and speakers turn into flutter */
+    if (f * 0.5 >= 42) partial(lp, f * 0.5, 0.30, dur * 1.15, when, 0.055);
+    partial(lp, f,        1.00, dur,        when, 0.040);
+    partial(lp, f * 2.01, 0.13, dur * 0.28, when, 0.030);
+    partial(lp, f * 2.98, 0.04 + 0.05*tone, dur * 0.14, when, 0.022);
+    scheduleCleanup(out, when + dur * 1.15);
+  } else {
+    var span = Math.max(1, state.count - 1);
+    var dur2 = (1.5 + 2.4 * state.res) * (0.5 + 0.5 * (1 - p.k / span));
+    var lp2 = actx.createBiquadFilter();
+    lp2.type = "lowpass";
+    lp2.frequency.setValueAtTime(Math.min(11000, f * (3.2 + 9 * tone) + 500), when);
+    lp2.Q.value = 0.4;
+    lp2.connect(out);
+    partial(lp2, f,        1.00, dur2,        when, 0.012);
+    partial(lp2, f * 2.00, 0.20, dur2 * 0.55, when, 0.014);
+    partial(lp2, f * 3.93, 0.09 + 0.16 * tone, dur2 * 0.24, when, 0.006);
+    partial(lp2, f * 9.20, 0.008 + 0.05 * tone, dur2 * 0.07, when, 0.004);
+    if (tone > 0.18){
+      var src = actx.createBufferSource();
+      src.buffer = noiseBuf;
+      var bp = actx.createBiquadFilter();
+      bp.type = "bandpass"; bp.frequency.value = Math.min(9000, f * 4); bp.Q.value = 1.1;
+      var ng = actx.createGain();
+      ng.gain.value = 0.035 + 0.075 * tone;
+      src.connect(bp); bp.connect(ng); ng.connect(out);
+      src.start(when);
+    }
+    scheduleCleanup(out, when + dur2 * 1.15);
+  }
+}
+
+/* Two-stage decay. A single exponential over 9-12 s is a constant dB/s slide, which reads
+   as a held sine rather than a struck bell. Real bars dump most of their energy in the first
+   moment and leave a quiet tail, so: fast drop to ~30 %, then the long tail from there. */
+function partial(dest, freq, amp, dur, when, atk){
+  var o = actx.createOscillator();
+  o.type = "sine";
+  o.frequency.value = freq;
+  var g = actx.createGain();
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.linearRampToValueAtTime(amp, when + atk);
+  var knee = when + atk + dur * 0.11;
+  g.gain.exponentialRampToValueAtTime(amp * 0.30, knee);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+  o.connect(g); g.connect(dest);
+  o.start(when);
+  o.stop(when + dur + 0.05);
+}
+
+function scheduleCleanup(node, at){
+  var ms = Math.max(0, (at - actx.currentTime) * 1000) + 500;
+  setTimeout(function(){ activeVoices--; try { node.disconnect(); } catch(e){} }, ms);
+}
+
+/* ---------------------------------------------------------------------------
+   Frequency drift.
+
+   Each arm's instantaneous frequency is slowly modulated,
+
+       f_k(t) = (n_k/T) · (1 + d·sin(2πt/Td + ψ_k))
+
+   with its own phase ψ_k, so the arms speed up and slow down one after another
+   instead of together. A varying period has no closed-form crossing time, but the
+   PHASE does: φ_k(t) = 2π·(n_k/T)·W(t), where W is the integral of the modulation,
+
+       W(t, ψ) = t + d·(Td/2π)·(cos ψ − cos(2πt/Td + ψ))
+
+   So the arm behaves exactly as before, in warped time. Crossings are the old
+   formula evaluated in W, then mapped back to real time by inverting W — which is
+   safe because dW/dt = 1 + d·sin(...) > 0 for d < 1, so W is strictly monotonic.
+
+   W(0) = 0 and W(m·Td) = m·Td, so the rig starts perfectly in phase and warped time
+   rejoins real time every drift period. That is what keeps the repeat period exact:
+   it becomes lcm(q, driftCycles) cycles instead of q.
+   --------------------------------------------------------------------------- */
+function driftDepth(){ return state.warp / 100; }
+function driftPeriod(){ return state.cycle * state.warpCyc; }
+function armPsi(p){
+  return 2 * Math.PI * (state.warpSeq / 100) *
+         (state.count > 1 ? p.k / (state.count - 1) : 0);
+}
+function warpTime(t, ps){
+  var d = driftDepth();
+  if (d <= 0) return t;
+  var Td = driftPeriod();
+  return t + d * (Td / (2 * Math.PI)) * (Math.cos(ps) - Math.cos(2 * Math.PI * t / Td + ps));
+}
+/* one fixed-point guess then two Newton steps — residual is ~1e-14 s */
+function unwarpTime(x, ps){
+  var d = driftDepth();
+  if (d <= 0) return x;
+  var Td = driftPeriod(), w = 2 * Math.PI / Td, A = d * (Td / (2 * Math.PI));
+  var t = x - A * (Math.cos(ps) - Math.cos(w * x + ps));
+  for (var i = 0; i < 2; i++){
+    t -= (t + A * (Math.cos(ps) - Math.cos(w * t + ps)) - x) / (1 + d * Math.sin(w * t + ps));
+  }
+  return t;
+}
+/* instantaneous frequency ratio — the arms really do lengthen and shorten */
+function armRatio(p, t){
+  var d = driftDepth();
+  if (d <= 0) return 1;
+  return 1 + d * Math.sin(2 * Math.PI * t / driftPeriod() + armPsi(p));
+}
+
+/* ---------------------------------------------------------------------------
+   Centre crossings, with a per-arm release angle α_k:
+
+       θ_k(t) = A·cos( 2π W(t,ψ_k)/P_k + α_k )
+
+   Zeros are still closed-form — the offset just slides the whole ladder:
+
+       W = P_k · ( (2j+1)/4 − α_k/2π )
+
+   The period itself is detuned per arm as well (P = T / (n·(1+ε_k))), which is
+   what finally removes any exact repeat: the swing counts stop being integers,
+   so no common multiple exists.
+   --------------------------------------------------------------------------- */
+function crossing(p, m){
+  var wm = p.period * ((2 * (m * state.stride) + 1) / 4 - p.alpha / (2 * Math.PI));
+  return unwarpTime(wm, armPsi(p));
+}
+function indexFromWarped(p, wt){
+  return (4 * (wt / p.period + p.alpha / (2 * Math.PI)) - 1) / (2 * state.stride);
+}
+/* lowest index whose crossing still lands at t >= 0 */
+function minIndex(p){ return Math.ceil(indexFromWarped(p, 0)); }
+
+function firstIndexAfter(p, t){
+  return Math.max(minIndex(p), Math.ceil(indexFromWarped(p, warpTime(t, armPsi(p)))));
+}
+function crossIndexAt(p, t){
+  return Math.floor(indexFromWarped(p, warpTime(t, armPsi(p))));
+}
+function syncScheduler(){
+  var t = simNow();
+  for (var i = 0; i < pend.length; i++) pend[i].m = firstIndexAfter(pend[i], t);
+}
+
+/* strikes per second across the whole rig — the single number that decides how busy it feels */
+function density(){
+  var s = 0;
+  for (var i = 0; i < pend.length; i++) s += pend[i].nEff;
+  return 2 * s / (state.cycle * state.stride);
+}
+
+/* The shape repeats every cycle, but the strike pattern need not. Arm k returns to its own
+   sequence after q = stride / gcd(stride, 2n) cycles; the rig repeats after the lcm of those. */
+function gcd2(a, b){ while (b){ var t = a % b; a = b; b = t; } return a; }
+function repeatCycles(){
+  var q = 1;
+  for (var i = 0; i < pend.length; i++){
+    var qi = state.stride / gcd2(state.stride, 2 * pend[i].n);
+    q = q * qi / gcd2(q, qi);
+  }
+  if (state.warp > 0) q = q * state.warpCyc / gcd2(q, state.warpCyc);
+  return q;
+}
+
+var LOOKAHEAD = 1.2, TICK = 140, timer = null;
+
+function pump(){
+  if (!running || !actx) return;
+  var horizon = simNow() + LOOKAHEAD;
+  var norm = strikeNorm();
+  var ci = chordIndexAt(simNow());
+  if (ci !== padIdx){ padIdx = ci; setChord(ci); }
+  for (var i = 0; i < pend.length; i++){
+    var p = pend[i], guard = 0;
+    while (crossing(p, p.m) < horizon && guard++ < 200){
+      var ts = crossing(p, p.m);
+      var at = simToAudio(ts);
+      if (at > actx.currentTime + 0.005){
+        var tilt2 = p.bass ? 1.20 : (1.0 - 0.30 * (p.k / Math.max(1, state.count - 1)));
+        /* the swell runs on T·φ — an irrational ratio to the cycle, so the loud
+           moments never land on the same part of the pattern twice */
+        var swell = state.breathe
+          ? 0.30 + 0.70 * (0.5 - 0.5 * Math.cos(2 * Math.PI * (ts / (state.cycle * PHI))))
+          : 1;
+        strike(at, p, norm * tilt2 * swell);
+      }
+      p.m++;
+    }
+  }
+}
+
+/* ============================ transport ============================ */
+var playBtn = document.getElementById("play");
+var playGlyph = document.getElementById("play-glyph");
+var playText = document.getElementById("play-text");
+var scrim = document.getElementById("scrim");
+
+function start(){
+  initAudio();
+  if (actx.state === "suspended") actx.resume();
+  simAtStart = frozenSim;
+  audioAtStart = actx.currentTime + 0.06;
+  running = true;
+  syncScheduler();
+  if (timer) clearInterval(timer);
+  timer = setInterval(pump, TICK);
+  pump();
+  ensureDrone();
+  ensurePad();
+  padIdx = -1;
+  applyMix();
+  playGlyph.innerHTML = "&#9646;&#9646;";
+  playText.textContent = "Pause";
+  playBtn.setAttribute("aria-label", "Pause");
+  scrim.hidden = true;
+}
+function stop(){
+  frozenSim = simNow();
+  running = false;
+  if (timer){ clearInterval(timer); timer = null; }
+  applyMix();                       /* fades the drone out instead of cutting it */
+  playGlyph.innerHTML = "&#9654;";
+  playText.textContent = "Play";
+  playBtn.setAttribute("aria-label", "Play");
+  scrim.hidden = false;
+}
+function toggle(){ running ? stop() : start(); }
+
+playBtn.addEventListener("click", toggle);
+document.getElementById("bigplay").addEventListener("click", toggle);
+document.getElementById("wrap").addEventListener("click", function(e){
+  if (e.target.id === "bigplay") return;
+  toggle();
+});
+document.getElementById("restart").addEventListener("click", function(){
+  frozenSim = 0;
+  if (running){ simAtStart = 0; audioAtStart = actx.currentTime + 0.06; }
+  syncScheduler();
+});
+
+var stage = document.getElementById("stage");
+document.getElementById("fs").addEventListener("click", function(){
+  if (document.fullscreenElement) document.exitFullscreen();
+  else if (stage.requestFullscreen) stage.requestFullscreen();
+});
+document.addEventListener("keydown", function(e){
+  if (e.code === "Space" && !/^(INPUT|SELECT|BUTTON|TEXTAREA|SUMMARY)$/.test(e.target.tagName)){
+    e.preventDefault(); toggle();
+  }
+});
+
+/* in fullscreen the chrome steps out of the way after a few still seconds */
+var idleTimer = null;
+function wake(){
+  if (!document.fullscreenElement) return;
+  stage.classList.remove("immersive");
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(function(){
+    if (document.fullscreenElement) stage.classList.add("immersive");
+  }, 2800);
+}
+stage.addEventListener("mousemove", wake);
+document.addEventListener("fullscreenchange", function(){
+  clearTimeout(idleTimer);
+  stage.classList.remove("immersive");
+  if (document.fullscreenElement) wake();
+  setTimeout(resize, 60);
+});
+
+/* ============================ canvas ============================ */
+var bg = document.getElementById("bg"), gb = bg.getContext("2d");
+var cv = document.getElementById("cv"), g2 = cv.getContext("2d");
+var fx = document.getElementById("fx"), gf = fx.getContext("2d");
+var W = 0, H = 0, DPR = 1;
+
+function resize(){
+  var r = cv.getBoundingClientRect();
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = Math.max(1, Math.round(r.width));
+  H = Math.max(1, Math.round(r.height));
+  [bg, cv, fx].forEach(function(c){
+    c.width = Math.round(W * DPR);
+    c.height = Math.round(H * DPR);
+    c.getContext("2d").setTransform(DPR, 0, 0, DPR, 0, 0);
+  });
+  g2.clearRect(0, 0, W, H);
+  paintSky();
+}
+
+/* deterministic field, so a resize does not reshuffle the sky */
+function rng(seed){
+  var s = seed >>> 0;
+  return function(){ s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+}
+
+function paintSky(){
+  gb.clearRect(0, 0, W, H);
+  var deep = gb.createLinearGradient(0, 0, 0, H);
+  deep.addColorStop(0, "#0A0E20");
+  deep.addColorStop(0.55, "#070A15");
+  deep.addColorStop(1, "#05060D");
+  gb.fillStyle = deep;
+  gb.fillRect(0, 0, W, H);
+  if (!state.stars) return;
+
+  var rand = rng(20260906);
+  gb.globalCompositeOperation = "lighter";
+
+  /* three faint clouds in the page's own palette — the ground the bells hang in */
+  var clouds = [[0.30, 0.22, 0.62, [62,92,168]], [0.74, 0.44, 0.52, [53,160,166]], [0.48, 0.86, 0.70, [239,181,94]]];
+  for (var i = 0; i < clouds.length; i++){
+    var c = clouds[i];
+    var R = Math.max(W, H) * c[2];
+    var g = gb.createRadialGradient(W * c[0], H * c[1], 0, W * c[0], H * c[1], R);
+    g.addColorStop(0, css(c[3], 0.055));
+    g.addColorStop(0.5, css(c[3], 0.018));
+    g.addColorStop(1, css(c[3], 0));
+    gb.fillStyle = g;
+    gb.fillRect(0, 0, W, H);
+  }
+
+  /* The sky is depth, not competition: stars stay points. Anything bigger than about a
+     pixel starts reading as a bob and the rig stops being legible. */
+  var n = Math.round(W * H / 9000);
+  for (var s = 0; s < n; s++){
+    var x = rand() * W, y = rand() * H;
+    var mag = Math.pow(rand(), 2.8);
+    var rr = 0.3 + mag * 0.85;
+    var a = 0.06 + mag * 0.40;
+    var tint = rand();
+    var col = tint < 0.16 ? [176,200,255] : (tint > 0.90 ? [255,224,180] : [232,238,250]);
+    gb.fillStyle = css(col, a);
+    gb.beginPath();
+    gb.arc(x, y, rr, 0, Math.PI * 2);
+    gb.fill();
+  }
+  gb.globalCompositeOperation = "source-over";
+}
+if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
+window.addEventListener("resize", resize);
+
+/* Radius follows the arm's real length, compressed by ^0.6 so the short arms still
+   spread out. Because the deep-bass arms genuinely are the long ones, splitting them
+   onto their own pivot makes the bass frame visibly the larger of the two rigs —
+   the separation is the physics, not a decoration. */
+function armUnit(p){ return Math.pow(p.length, 0.6); }
+
+function layout(){
+  var N = pend.length, i;
+  if (!N) return { groups: [] };
+  var nb = 0;
+  for (i = 0; i < N; i++) if (pend[i].bass) nb++;
+
+  var u = [];
+  for (i = 0; i < N; i++) u.push(armUnit(pend[i]));
+
+  /* One rig, one pivot. The two families are separated by opening a clear radial gap
+     between the last bass arm and the first chime, so the break reads as a break in the
+     instrument rather than as two instruments. */
+  var span = Math.max.apply(null, u) - Math.min.apply(null, u);
+  var gap = (nb > 0 && nb < N) ? Math.min(0.19 * span, u[N - 1] * 0.42) : 0;
+  var adj = [];
+  for (i = 0; i < N; i++) adj.push(i < nb ? u[i] : u[i] - gap);
+
+  /* reserve a strip on the left for the band brackets */
+  var uTop = Math.max.apply(null, adj);
+  var allowed = Math.min(H - 52, (W / 2 - 78) / Math.sin(AMP + 0.075))
+                / (1 + 1.2 * driftDepth());
+  var s = allowed / uTop;
+  var radii = [];
+  for (i = 0; i < N; i++) radii.push(s * adj[i]);
+  var mx = Math.max.apply(null, radii), mn = Math.min.apply(null, radii);
+
+  return { groups: [{
+    px: W / 2, py: Math.max(22, (H - mx) * 0.46),
+    maxR: mx, minR: mn, list: pend, radii: radii, nb: nb,
+    step: N > 1 ? (mx - mn) / (N - 1) : mx, bass: false
+  }], beam: null };
+}
+
+var TAIL = 6;
+
+function draw(){
+  var t = simNow(), N = pend.length, lay = layout();
+  var glow = state.glow / 100;
+  var br = 0.55 + 0.45 * breath(t);     /* the swell you hear, on screen */
+
+  /* Every frame is drawn from scratch. Accumulating trails by fading the layer toward
+     transparency cannot work in 8-bit: once a pixel's alpha step rounds below 1/255 it
+     stops decreasing and the smear becomes permanent. The tail below is computed from
+     the pendulum equation instead, so it is exact and leaves nothing behind. */
+  g2.clearRect(0, 0, W, H);
+  g2.globalCompositeOperation = "lighter";
+  gf.clearRect(0, 0, W, H);
+
+  /* the whole rig sways on a period unrelated to the cycle, so it never looks mechanical */
+  var sway = state.drift ? 0.062 * Math.sin(2 * Math.PI * t / (state.cycle * 2.618)) : 0;
+
+  gf.globalCompositeOperation = "lighter";
+
+  for (var gi = 0; gi < lay.groups.length; gi++){
+    var G = lay.groups[gi], GN = G.list.length;
+
+    g2.save(); g2.translate(G.px, G.py); g2.rotate(sway);
+    gf.save(); gf.translate(G.px, G.py); gf.rotate(sway);
+
+  /* scale the bob to the frame as well as to the arc spacing, or a big canvas turns the
+     rig into specks indistinguishable from the sky behind it */
+  var bobR = Math.max(2.4, Math.min(9, G.step * 0.6, G.maxR * 0.017));
+  var axisEnd = G.maxR + 16;
+
+  /* how much of this rig is ringing right now — its axis brightens with it */
+  var energy = 0;
+  for (var e = 0; e < GN; e++){
+    var pe = G.list[e];
+    var me = crossIndexAt(pe, t);
+    if (me >= minIndex(pe)) energy += ampEnv(t - crossing(pe, me), voiceDur(pe)) * (pe.bass ? 1.7 : 0.7);
+  }
+  energy = Math.min(1, energy / Math.max(2, GN * 0.45));
+
+  var grad = gf.createLinearGradient(0, 0, 0, axisEnd);
+  grad.addColorStop(0,    "rgba(190,205,240,0.02)");
+  grad.addColorStop(0.18, "rgba(190,205,240," + (0.09 + 0.30 * energy * br).toFixed(3) + ")");
+  grad.addColorStop(1,    "rgba(190,205,240," + (0.04 + 0.12 * energy * br).toFixed(3) + ")");
+  gf.strokeStyle = grad;
+  gf.lineWidth = 1 + 1.6 * energy;
+  gf.beginPath();
+  gf.moveTo(0.5, 0);
+  gf.lineTo(0.5, axisEnd);
+  gf.stroke();
+
+  if (state.strings){
+    g2.lineWidth = 1;
+    for (var a = 0; a < GN; a++){
+      g2.strokeStyle = css(G.list[a].color, 0.11 * br);
+      g2.beginPath();
+      g2.arc(0, 0, G.radii[a], Math.PI/2 - AMP, Math.PI/2 + AMP);
+      g2.stroke();
+    }
+  }
+
+  for (var i = 0; i < GN; i++){
+    var p = G.list[i];
+    var rho = armRatio(p, t);
+    /* radius follows the arm's instantaneous length: L is 1/f^2, radius is L^0.6 */
+    var r = G.radii[i] * Math.pow(rho, -1.2);
+    var wt = warpTime(t, armPsi(p));
+    var ang = Math.PI / 2 + AMP * Math.cos(2 * Math.PI * wt / p.period + p.alpha);
+    var x = r * Math.cos(ang), y = r * Math.sin(ang);
+    var life = voiceDur(p);
+    var m = crossIndexAt(p, t), mLo0 = minIndex(p);
+    var ring = m >= mLo0 ? ampEnv(t - crossing(p, m), life) : 0;
+
+    if (state.strings){
+      g2.strokeStyle = css(p.color, (0.10 + 0.22 * ring) * br);
+      g2.lineWidth = 1;
+      g2.beginPath(); g2.moveTo(0, 0); g2.lineTo(x, y); g2.stroke();
+    }
+
+    var rad = bobR * 1.34 * p.size;
+
+    /* Motion tail sampled backwards along the arm's own trajectory — a shutter, not a
+       memory. Fast-moving bobs stretch, bobs pausing at the turn stay round. */
+    for (var s = TAIL; s >= 1; s--){
+      var tp = warpTime(t - s * 0.019, armPsi(p));
+      var ap = Math.PI / 2 + AMP * Math.cos(2 * Math.PI * tp / p.period + p.alpha);
+      var tr = rad * (1.05 - 0.045 * s);
+      g2.globalAlpha = 0.13 * (1 - s / (TAIL + 1)) * br;
+      g2.drawImage(p.orb, r * Math.cos(ap) - tr, r * Math.sin(ap) - tr, tr * 2, tr * 2);
+    }
+    var cr = rad * 1.15;
+    g2.globalAlpha = Math.min(1, (0.55 + 0.45 * ring) * br);
+    g2.drawImage(p.orb, x - cr, y - cr, cr * 2, cr * 2);
+    g2.globalAlpha = 1;
+
+    /* halo on the overlay, swelling and decaying exactly like the note */
+    var hr = rad * (2.0 + 2.6 * glow) * (1 + 0.50 * ring);
+    gf.globalAlpha = (0.22 + 0.58 * ring) * (0.45 + 0.55 * glow) * br;
+    gf.drawImage(p.orb, x - hr, y - hr, hr * 2, hr * 2);
+    /* and a hard core on top, so every arm always reads as an object, not a smudge */
+    var kr = rad * 0.95;
+    gf.globalAlpha = Math.min(1, (0.72 + 0.28 * ring) * br);
+    gf.drawImage(p.orb, x - kr, y - kr, kr * 2, kr * 2);
+    gf.globalAlpha = 1;
+
+    /* a bass arm carries a rim, like the lip of a bell — the clearest single tell */
+    if (p.bass){
+      gf.strokeStyle = css(p.color, (0.26 + 0.55 * ring) * br);
+      gf.lineWidth = 1.1;
+      gf.beginPath();
+      gf.arc(x, y, rad * (1.9 + 0.5 * ring), 0, Math.PI * 2);
+      gf.stroke();
+    }
+
+    /* Rings leaving the strike axis. One per recent crossing, each spreading fast then
+       slowing, each fading on that note's own envelope — bass bells throw wide slow
+       rings, high chimes small quick ones. */
+    var maxRing = (16 + 54 * p.size) * (0.55 + 0.75 * glow);
+    var mLo = minIndex(p);
+    for (var mm = m, guard = 0; mm >= mLo && guard < 5; mm--, guard++){
+      var age = t - crossing(p, mm);
+      if (age >= life) break;
+      var env = ampEnv(age, life);
+      if (env < 0.004) continue;
+      var rr = maxRing * (1 - Math.exp(-age / (life * 0.30)));
+      gf.strokeStyle = css(p.color, 0.58 * env * br);
+      gf.lineWidth = (0.8 + 1.8 * p.size) * (0.35 + 0.65 * env);
+      gf.beginPath();
+      gf.arc(0, r, rr, 0, Math.PI * 2);
+      gf.stroke();
+    }
+
+    /* the moment of contact, on the axis */
+    if (ring > 0.02){
+      var half = Math.max(5, G.step * 0.5) * (0.55 + 0.75 * p.size);
+      gf.strokeStyle = css(p.color, 0.9 * ring * br);
+      gf.lineWidth = 1.1 + 1.5 * p.size;
+      gf.beginPath();
+      gf.moveTo(0.5, r - half);
+      gf.lineTo(0.5, r + half);
+      gf.stroke();
+    }
+  }
+
+  /* Brackets down the left, outside the swing, naming the two families. */
+  if (G.nb > 0 && G.nb < GN){
+    var th = Math.PI / 2 + AMP + 0.115;
+    var ct = Math.cos(th), st = Math.sin(th);
+    var pcx = Math.cos(th + Math.PI / 2), pcy = Math.sin(th + Math.PI / 2);
+    var bands = [
+      [G.radii[0], G.radii[G.nb - 1], "BASS",  G.list[0].color],
+      [G.radii[G.nb], G.radii[GN - 1], "CHIME", G.list[GN - 1].color]
+    ];
+    for (var bI = 0; bI < 2; bI++){
+      var r0 = bands[bI][0], r1 = bands[bI][1], col = bands[bI][3];
+      gf.strokeStyle = css(col, 0.34 * br);
+      gf.lineWidth = 1;
+      gf.beginPath();
+      gf.moveTo(r0 * ct, r0 * st); gf.lineTo(r1 * ct, r1 * st); gf.stroke();
+      for (var eI = 0; eI < 2; eI++){
+        var rr = eI ? r1 : r0;
+        gf.beginPath();
+        gf.moveTo(rr * ct - 4 * pcx, rr * st - 4 * pcy);
+        gf.lineTo(rr * ct + 4 * pcx, rr * st + 4 * pcy);
+        gf.stroke();
+      }
+      var rm = (r0 + r1) / 2;
+      gf.save();
+      gf.translate(rm * ct, rm * st);
+      gf.rotate(-sway);
+      gf.fillStyle = css(col, 0.46 * br);
+      gf.font = '9px "IBM Plex Mono", ui-monospace, monospace';
+      gf.textAlign = "right";
+      gf.textBaseline = "middle";
+      gf.fillText(bands[bI][2], -7, 0);
+      gf.restore();
+    }
+  }
+
+  /* the mounting bar and the quiet point the rig hangs from */
+  gf.strokeStyle = "rgba(190,205,240,0.13)";
+  gf.lineWidth = 1.5;
+  gf.beginPath(); gf.moveTo(-24, -2.5); gf.lineTo(24, -2.5); gf.stroke();
+  var pg = gf.createRadialGradient(0, 0, 0, 0, 0, 20);
+  pg.addColorStop(0, "rgba(239,181,94,0.42)");
+  pg.addColorStop(0.35, "rgba(239,181,94,0.11)");
+  pg.addColorStop(1, "rgba(239,181,94,0)");
+  gf.fillStyle = pg;
+  gf.beginPath(); gf.arc(0, 0, 20, 0, Math.PI * 2); gf.fill();
+
+    g2.restore();
+    gf.restore();
+  }
+
+  gf.globalCompositeOperation = "source-over";
+}
+
+/* ============================ readouts ============================ */
+var clockEl = document.getElementById("clock");
+var phaseEl = document.getElementById("phase");
+var fillEl = document.getElementById("fill");
+var headEl = document.getElementById("head");
+
+function fmt(s){
+  var mm = Math.floor(s / 60), ss = s - mm * 60;
+  return (mm < 10 ? "0" : "") + mm + ":" + (ss < 10 ? "0" : "") + ss.toFixed(1);
+}
+function phaseLabel(u){
+  var tol = 0.012;
+  if (u < tol || u > 1 - tol) return "all in phase";
+  if (Math.abs(u - 0.5) < tol) return "two groups";
+  if (Math.abs(u - 1/3) < tol || Math.abs(u - 2/3) < tol) return "three groups";
+  if (Math.abs(u - 0.25) < tol || Math.abs(u - 0.75) < tol) return "four groups";
+  return "travelling wave";
+}
+function readouts(){
+  var t = simNow();
+  var u = (t % state.cycle) / state.cycle;
+  var c = Math.floor(t / state.cycle), q = state.detune > 0 ? 1 : repeatCycles();
+  clockEl.textContent = fmt(t % state.cycle) + " / " + fmt(state.cycle)
+    + "   ·   cycle " + (c + 1) + (q > 1 ? " · pass " + (c % q + 1) + "/" + q : "");
+  phaseEl.textContent = phaseLabel(u);
+  fillEl.style.width = (u * 100) + "%";
+  headEl.style.left = (u * 100) + "%";
+  /* the sky drifts a fraction of a percent per minute — parallax, done by the compositor */
+  bg.style.transform = "scale(1.06) translate("
+    + (Math.sin(t * 0.0041) * 0.9).toFixed(3) + "%,"
+    + (Math.cos(t * 0.0029) * 0.9).toFixed(3) + "%)";
+}
+
+var railEl = document.getElementById("rail");
+function drawCycleMarks(){
+  var old = railEl.querySelectorAll(".cycle-mark");
+  for (var i = 0; i < old.length; i++) old[i].remove();
+  [[0.25,"4",false],[1/3,"3",false],[0.5,"2",true],[2/3,"3",false],[0.75,"4",false],[1,"aligned",true]]
+  .forEach(function(m){
+    var d = document.createElement("div");
+    d.className = "cycle-mark" + (m[2] ? " major" : "") + (m[0] === 1 ? " end" : "");
+    d.style.left = (m[0] * 100) + "%";
+    var s = document.createElement("span");
+    s.textContent = m[1];
+    d.appendChild(s);
+    railEl.appendChild(d);
+  });
+}
+
+function noteName(midi){ return NOTE_NAMES[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1); }
+function fmtLen(L){
+  if (L >= 1000) return (L / 1000).toFixed(2) + " km";
+  if (L >= 1) return L.toFixed(2) + " m";
+  return (L * 100).toFixed(1) + " cm";
+}
+
+function renderLedger(){
+  var rows = [];
+  for (var i = 0; i < pend.length; i++){
+    var p = pend[i];
+    var sw = Math.min(13, 5.5 + 7.5 * p.size).toFixed(1);
+    rows.push("<tr>"
+      + '<td><span class="swatch" style="background:' + css(p.color,1)
+        + ';width:' + sw + 'px;height:' + sw + 'px"></span>' + (i+1) + "</td>"
+      + "<td>" + (state.detune > 0 ? p.nEff.toFixed(2) : p.n) + "</td>"
+      + "<td>" + p.period.toFixed(3) + " s</td>"
+      + "<td>" + fmtLen(p.length) + "</td>"
+      + "<td>" + Math.round(2 * p.nEff * 60 / state.cycle / state.stride) + "</td>"
+      + '<td class="note">' + noteName(p.midi) + "</td>"
+      + "<td>" + p.freq.toFixed(1) + " Hz</td>"
+      + "<td>" + (p.bass ? '<span class="voice-bass">deep bass</span>' : "chime") + "</td>"
+      + "</tr>");
+  }
+  document.getElementById("tbody").innerHTML = rows.join("");
+}
+
+function renderMeta(){
+  var lo = pend[pend.length - 1], hi = pend[0], d = density();
+  document.getElementById("meta-len").textContent = fmtLen(lo.length) + " – " + fmtLen(hi.length);
+  document.getElementById("meta-per").textContent = lo.period.toFixed(2) + " – " + hi.period.toFixed(2) + " s";
+  document.getElementById("meta-rate").textContent = d.toFixed(1);
+  document.getElementById("o-dens").textContent = d.toFixed(1) + " strikes / s";
+  document.getElementById("meta-gap").textContent = (hi.period * state.stride / 2).toFixed(1) + " s";
+  if (state.detune > 0){
+    document.getElementById("meta-repeat").textContent = "never — arms detuned";
+  } else {
+    var q = repeatCycles();
+    document.getElementById("meta-repeat").textContent = clock(q * state.cycle) + (q > 1 ? " (" + q + " cycles)" : "");
+  }
+}
+
+function clock(s){
+  var m = Math.floor(s / 60), r = Math.round(s - m * 60);
+  if (r === 60){ m++; r = 0; }
+  return m + ":" + (r < 10 ? "0" : "") + r;
+}
+
+/* ============================ controls ============================ */
+function el(id){ return document.getElementById(id); }
+
+function bindRange(id, outId, key, fmtFn, structural, div){
+  var input = el(id), out = el(outId);
+  function apply(){
+    state[key] = div ? (+input.value) / div : +input.value;
+    out.textContent = fmtFn(state[key]);
+    if (structural) build(); else syncScheduler();
+    applyMix();
+    if (structural){
+      retuneDrone();
+      if (C && C.base) C.base.out.textContent = baseLabel(state.base);
+    }
+  }
+  input.addEventListener("input", apply);
+  return { input: input, out: out, fmt: fmtFn, div: div || 1 };
+}
+
+function baseLabel(v){ return v + " – " + (v + state.count - 1); }
+
+/* 24 s … 1800 s on a log slider, so the short end stays steerable */
+function cycleFromSlider(v){
+  var s = 24 * Math.pow(75, v / 1000);
+  if (s < 120) return Math.round(s);
+  if (s < 600) return Math.round(s / 5) * 5;
+  return Math.round(s / 15) * 15;
+}
+function sliderFromCycle(c){ return Math.round(1000 * Math.log(c / 24) / Math.log(75)); }
+function fmtCycle(c){ return c < 100 ? c + " s" : Math.floor(c / 60) + ":" + (c % 60 < 10 ? "0" : "") + (c % 60); }
+
+var C = {
+  count: bindRange("s-count","o-count","count", function(v){ return v; }, true),
+  base:  bindRange("s-base", "o-base", "base",  baseLabel, true),
+  bass:  bindRange("s-bass", "o-bass", "bass",  function(v){ return v; }, true),
+  vol:   bindRange("s-vol",  "o-vol",  "vol",   function(v){ return v; }, false),
+  rev:   bindRange("s-rev",  "o-rev",  "rev",   function(v){ return v; }, false),
+  tone:  bindRange("s-tone", "o-tone", "tone",  function(v){ return v; }, false),
+  res:   bindRange("s-res",  "o-res",  "res",   function(v){ return v.toFixed(2) + "×"; }, false, 100),
+  glow:  bindRange("s-glow", "o-glow", "glow",  function(v){ return v; }, false)
+};
+
+function warpChanged(){ syncScheduler(); renderMeta(); }
+C.spread = bindRange("s-spread", "o-spread", "spread", function(v){ return v; }, true);
+C.detune = bindRange("s-detune", "o-detune", "detune", function(v){ return v.toFixed(2) + " %"; }, true, 100);
+el("reseed").addEventListener("click", function(){
+  state.seed = (Math.random() * 2147483647) >>> 0;
+  build();
+});
+C.warp    = bindRange("s-warp",    "o-warp",    "warp",    function(v){ return v.toFixed(1) + " %"; }, false, 10);
+C.warpCyc = bindRange("s-warpcyc", "o-warpcyc", "warpCyc", function(v){ return v + " cycle" + (v === 1 ? "" : "s"); }, false);
+C.warpSeq = bindRange("s-warpseq", "o-warpseq", "warpSeq", function(v){ return v; }, false);
+["s-warp","s-warpcyc","s-warpseq"].forEach(function(id){ el(id).addEventListener("input", warpChanged); });
+
+C.cycle = (function(){
+  var input = el("s-cycle"), out = el("o-cycle");
+  input.addEventListener("input", function(){
+    state.cycle = cycleFromSlider(+input.value);
+    out.textContent = fmtCycle(state.cycle);
+    build();
+    applyMix();
+    retuneDrone();
+    C.base.out.textContent = baseLabel(state.base);
+  });
+  return { input: input, out: out, fmt: fmtCycle, toSlider: sliderFromCycle };
+})();
+
+var keySel = el("s-key");
+NOTE_NAMES.forEach(function(n, i){
+  var o = document.createElement("option");
+  o.value = i; o.textContent = n;
+  keySel.appendChild(o);
+});
+var scaleSel = el("s-scale");
+SCALES.forEach(function(s){
+  var o = document.createElement("option");
+  o.value = s.id; o.textContent = s.name;
+  scaleSel.appendChild(o);
+});
+var octSel = el("s-oct");
+
+keySel.addEventListener("change", function(){ state.key = +keySel.value; build(); retuneDrone(); });
+scaleSel.addEventListener("change", function(){ state.scale = scaleSel.value; build(); retuneDrone(); });
+octSel.addEventListener("change", function(){ state.octave = +octSel.value; build(); retuneDrone(); });
+
+el("s-drone").addEventListener("change", function(e){
+  state.drone = e.target.checked;
+  if (state.drone){ ensureDrone(); ensurePad(); padIdx = -1; }
+  applyMix();
+});
+el("s-breathe").addEventListener("change", function(e){ state.breathe = e.target.checked; });
+el("s-strings").addEventListener("change", function(e){ state.strings = e.target.checked; });
+el("s-drift").addEventListener("change", function(e){ state.drift = e.target.checked; });
+el("s-stars").addEventListener("change", function(e){ state.stars = e.target.checked; paintSky(); });
+
+var segWrap = el("seg-stride");
+var segBtns = segWrap.querySelectorAll("button");
+function paintSeg(){
+  for (var i = 0; i < segBtns.length; i++)
+    segBtns[i].setAttribute("aria-pressed", +segBtns[i].dataset.v === state.stride ? "true" : "false");
+}
+for (var si = 0; si < segBtns.length; si++){
+  segBtns[si].addEventListener("click", function(e){
+    state.stride = +e.currentTarget.dataset.v;
+    paintSeg(); syncScheduler(); renderLedger(); renderMeta();
+  });
+}
+
+/* voice cards */
+var voiceWrap = el("voices");
+var voiceBtns = [];
+VOICES.forEach(function(v, idx){
+  var b = document.createElement("button");
+  b.className = "voice";
+  b.type = "button";
+  b.innerHTML = "<strong>" + v.id + "</strong><span>" + v.note + "</span>";
+  b.setAttribute("aria-pressed", idx === 0 ? "true" : "false");
+  b.addEventListener("click", function(){
+    Object.keys(v.p).forEach(function(k){ state[k] = v.p[k]; });
+    syncControls();
+    for (var i = 0; i < voiceBtns.length; i++)
+      voiceBtns[i].setAttribute("aria-pressed", voiceBtns[i] === b ? "true" : "false");
+    applyMix();
+    build();
+    retuneDrone();
+    if (state.drone) ensureDrone();
+    applyMix();
+  });
+  voiceBtns.push(b);
+  voiceWrap.appendChild(b);
+});
+
+function syncControls(){
+  ["count","base","bass","vol","rev","tone","glow","res","warp","warpCyc","warpSeq","spread","detune"].forEach(function(k){
+    C[k].input.value = Math.round(state[k] * C[k].div);
+    C[k].out.textContent = C[k].fmt(state[k]);
+  });
+  C.cycle.input.value = sliderFromCycle(state.cycle);
+  C.cycle.out.textContent = fmtCycle(state.cycle);
+  C.base.out.textContent = baseLabel(state.base);
+  keySel.value = state.key;
+  octSel.value = state.octave;
+  scaleSel.value = state.scale;
+  el("s-drone").checked = state.drone;
+  el("s-breathe").checked = state.breathe;
+  el("s-stars").checked = state.stars;
+  el("s-drift").checked = state.drift;
+  el("s-strings").checked = state.strings;
+  paintSeg();
+}
+
+/* ============================ boot ============================ */
+resize();
+syncControls();
+build();
+frozenSim = state.cycle * 0.146;   // open mid-wave, not on a flat line
+readouts();
+
+var acc = 0;
+function loop(ts){
+  draw();
+  if (ts - acc > 90){ readouts(); acc = ts; }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
